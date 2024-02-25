@@ -55,11 +55,7 @@ main :: proc() {
     cast(i32)MAIN_TEXTURE_SIZE.y * 4,
   )
   
-  fmt.eprintln("s")
-
   defer ENG.DestroyContext(&state.ctx)
-
-  fmt.eprintln(state.ctx)
 
   texture := SDL.CreateTexture(
     state.ctx.renderer,
@@ -73,6 +69,7 @@ main :: proc() {
   state.texture = texture;
 
   lastTickTime := time.now()._nsec
+  debugMenu := ENG.CreateDebugMenu()
 
   event: SDL.Event
   loop: for {
@@ -87,14 +84,19 @@ main :: proc() {
     state.gameState.pos.y += state.gameState.mov.y;
 
     if (state.gameState.pos.x >= MAIN_TEXTURE_SIZE.x || state.gameState.pos.x <= 0) {
+      fmt.eprintln("before changing x")
       state.gameState.mov.x = -state.gameState.mov.x;
+      fmt.eprintln("after changing x")
     }
     if (state.gameState.pos.y >= MAIN_TEXTURE_SIZE.y || state.gameState.pos.y <= 0) {
+      fmt.eprintln("before changing y")
       state.gameState.mov.y = -state.gameState.mov.y;
+      fmt.eprintln("after changing y")
     }
 
+    _texture := SDL.CreateTexture(state.ctx.renderer, &SDL.Rect{0,0,MAIN_TEXTURE_SIZE.x, MAIN_TEXTURE_SIZE.y})
     SDL.SetRenderTarget(state.ctx.renderer, state.texture)
-    SDL.SetRenderDrawColor(state.ctx.renderer, 0, 0, 0, 0xFF)
+    SDL.SetRenderDrawColor(state.ctx.renderer, 0, 0, 0xFF, 0xFF)
     SDL.RenderClear(state.ctx.renderer)
 
     SDL.SetRenderDrawColor(state.ctx.renderer, 0xFF, 0, 0, 0xFF)
@@ -120,8 +122,8 @@ main :: proc() {
     str.write_int(&builder, cast(int)delta)
     str.write_string(&builder, "\n")
     message := str.to_string(builder)
-    // fmt.eprintf(message)
-    debugTexture, debugRect := createDebugTexture(state.ctx.renderer, str.clone_to_cstring(message))
+
+    debugTexture, debugRect := ENG.GetDebugInfoTexture(state.ctx.renderer, &debugMenu, "Hello world")
     SDL.RenderCopy(state.ctx.renderer, debugTexture, nil, &SDL.Rect{10, 10, debugRect.w, debugRect.h })
 
     SDL.RenderPresent(state.ctx.renderer)
