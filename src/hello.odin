@@ -4,129 +4,97 @@ import "core:fmt"
 import "core:time"
 import str "core:strings"
 
-import SDL "vendor:sdl2"
-import TTF "vendor:sdl2/ttf"
+import sdl "vendor:sdl2"
+import sdl_ttf "vendor:sdl2/ttf"
 
-import ENG "engine"
+import const "constants"
+import engine "engine"
+import entities "entities"
 
-AppState :: struct {
-  ctx: ENG.Context,
-  texture: ^SDL.Texture,
-  gameState: ^GameState,
-}
-
-Vector2 :: struct {
-  x: int,
-  y: int,
-}
-
-GameState :: struct {
-  pos: ^Vector2,
-  mov: ^Vector2,
-}
-
-MAIN_TEXTURE_SIZE: ^Vector2 = &Vector2{
-  256,
-  144,
-}
-
-createDebugTexture :: proc(renderer: ^SDL.Renderer, message: cstring) -> (^SDL.Texture, ^SDL.Rect) {
-  font := TTF.OpenFont("noto.ttf", 24)
-  assert(font != nil, SDL.GetErrorString())
-  surface := TTF.RenderText_Solid(font, message, { 0x00, 0xFF, 0x00, 0xFF })
-  texture := SDL.CreateTextureFromSurface(renderer, surface)
-
-  size := &SDL.Rect{ 0, 0, surface.w, surface.h }
-  return texture, size
+get_time :: proc() -> f64 {
+	return f64(sdl.GetPerformanceCounter()) * 1000 / f64(sdl.GetPerformanceFrequency())
 }
 
 main :: proc() {
-  state := AppState {};
-  state.gameState = &GameState{
-    &Vector2{ 0, 0 },
-    &Vector2{ 1, 1 },
-  }
+	ctx := engine.CreateContext(
+		"Hello world",
+		cast(i32)(const.MAIN_TEXTURE_SIZE.x * const.SCREEN_UPSCALE),
+		cast(i32)(const.MAIN_TEXTURE_SIZE.y * const.SCREEN_UPSCALE),
+	)
 
-  TTF.Init()
+	keyboard := []u8{}
 
-  state.ctx = ENG.CreateContext(
-    "Hello world",
-    cast(i32)MAIN_TEXTURE_SIZE.x * 4,
-    cast(i32)MAIN_TEXTURE_SIZE.y * 4,
-  )
-  
-  defer ENG.DestroyContext(&state.ctx)
+	defer engine.DestroyContext(&ctx)
 
-  texture := SDL.CreateTexture(
-    state.ctx.renderer,
-    cast(u32)SDL.PixelFormatEnum.ARGB8888,
-    .TARGET,
-    256,
-    144,
-  )
-  assert(texture != nil, SDL.GetErrorString())
-  defer SDL.DestroyTexture(texture)
-  state.texture = texture;
+	texture := sdl.CreateTexture(
+		ctx.renderer,
+		cast(u32)sdl.PixelFormatEnum.ARGB8888,
+		.TARGET,
+		cast(i32)const.MAIN_TEXTURE_SIZE.x,
+		cast(i32)const.MAIN_TEXTURE_SIZE.y,
+	)
+	assert(texture != nil, sdl.GetErrorString())
+	defer sdl.DestroyTexture(texture)
 
-  lastTickTime := time.now()._nsec
-  debugMenu := ENG.CreateDebugMenu()
+	lastTickTime := get_time()
+	debugConfig := engine.CreateDebugConfig()
 
-  event: SDL.Event
-  loop: for {
-    for SDL.PollEvent(&event) {
-      #partial switch event.type {
-      case .QUIT:
-          break loop
-      }
-    }
+	initialPlayerPos := engine.Vec2{
+		cast(f32)(const.MAIN_TEXTURE_SIZE[0] / 3),
+		cast(f32)(const.MAIN_TEXTURE_SIZE[1] / 2),
+	}
 
-    state.gameState.pos.x += state.gameState.mov.x;
-    state.gameState.pos.y += state.gameState.mov.y;
+	player := entities.Entity {
+		type     = .Player,
+		pos      = initialPlayerPos,
+		mov      = [2]f32{0, 0},
+		isActive = true,
+	}
 
-    if (state.gameState.pos.x >= MAIN_TEXTURE_SIZE.x || state.gameState.pos.x <= 0) {
-      fmt.eprintln("before changing x")
-      state.gameState.mov.x = -state.gameState.mov.x;
-      fmt.eprintln("after changing x")
-    }
-    if (state.gameState.pos.y >= MAIN_TEXTURE_SIZE.y || state.gameState.pos.y <= 0) {
-      fmt.eprintln("before changing y")
-      state.gameState.mov.y = -state.gameState.mov.y;
-      fmt.eprintln("after changing y")
-    }
+	event: sdl.Event
+	loop: for {
+		for sdl.PollEvent(&event) {
+			#partial switch event.type {
+			case .QUIT:
+				break loop
+			}
+		}
 
-    _texture := SDL.CreateTexture(state.ctx.renderer, &SDL.Rect{0,0,MAIN_TEXTURE_SIZE.x, MAIN_TEXTURE_SIZE.y})
-    SDL.SetRenderTarget(state.ctx.renderer, state.texture)
-    SDL.SetRenderDrawColor(state.ctx.renderer, 0, 0, 0xFF, 0xFF)
-    SDL.RenderClear(state.ctx.renderer)
+		keyboard = sdl.GetKeyboardStateAsSlice()
 
-    SDL.SetRenderDrawColor(state.ctx.renderer, 0xFF, 0, 0, 0xFF)
-    SDL.RenderFillRect(
-      state.ctx.renderer, 
-      &SDL.Rect{
-        cast(i32)state.gameState.pos.x,
-        cast(i32)state.gameState.pos.y,
-        10,
-        10,
-      },
-    )
+		entities.UpdateEntity(&player, &GameState{})
 
-    SDL.SetRenderTarget(state.ctx.renderer, nil)
-    SDL.RenderCopy(state.ctx.renderer, state.texture, nil, nil)
+		sdl.SetRenderTarget(ctx.renderer, texture)
+		engine.Util_SetRenderDrawColor(ctx.renderer, &const.COLOR_BLACK)
+		sdl.RenderClear(ctx.renderer)
 
-    curTickTime := time.now()._nsec
-    delta := curTickTime - lastTickTime
-    lastTickTime = curTickTime
-    
-    builder := str.Builder{}
-    str.write_string(&builder, "Delta time: ")
-    str.write_int(&builder, cast(int)delta)
-    str.write_string(&builder, "\n")
-    message := str.to_string(builder)
+		entities.RenderEntity(ctx.renderer, &player)
 
-    debugTexture, debugRect := ENG.GetDebugInfoTexture(state.ctx.renderer, &debugMenu, "Hello world")
-    SDL.RenderCopy(state.ctx.renderer, debugTexture, nil, &SDL.Rect{10, 10, debugRect.w, debugRect.h })
+		engine.Util_SetRenderDrawColor(ctx.renderer, &const.COLOR_GREED)
 
-    SDL.RenderPresent(state.ctx.renderer)
-  }
+		curTickTime := get_time()
+		delta := curTickTime - lastTickTime
+		lastTickTime = curTickTime
+
+		sdl.SetRenderTarget(ctx.renderer, nil)
+		sdl.RenderCopy(ctx.renderer, texture, nil, nil)
+
+		builder := str.Builder{}
+		// engine.Debugger_AddLine(&builder, "Your current game session")
+		engine.Debugger_AddIntLine(&builder, "Delta time: ", cast(int)delta, "")
+		// engine.Debugger_AddStringLine(&builder, "Player Vector: ", str.to_string(player.mov[1]), "")
+		message := str.to_string(builder)
+
+		fmt.eprintln(message)
+
+		debugTexture, debugRect := engine.GetDebugInfoTexture(
+			ctx.renderer,
+			&debugConfig,
+			str.clone_to_cstring(message),
+		)
+
+		sdl.RenderCopy(ctx.renderer, debugTexture, nil, debugRect)
+
+		sdl.RenderPresent(ctx.renderer)
+	}
 }
-

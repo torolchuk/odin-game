@@ -1,0 +1,7 @@
+package constants
+
+MAIN_TEXTURE_SIZE := [2]int{240, 160}
+SCREEN_UPSCALE := 4
+
+TICKRATE := 240.0
+TICKTIME := 1000.0 / TICKRATE
