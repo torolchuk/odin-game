@@ -72,6 +72,12 @@ render_player :: proc(renderer: ^sdl.Renderer, entity: ^Entity) {
     6,
     6,
   })
+  sdl.RenderDrawRect(renderer, &sdl.Rect{
+    playerRect.x - 3,
+    playerRect.y + (playerRect.h / 2) - bobblingy + 3,
+    6,
+    6,
+  })
 }
 
 PIPE_WIDTH:i32 = 32
@@ -145,7 +151,7 @@ render_main_menu :: proc(renderer: ^sdl.Renderer) {
     FONT = ttf.OpenFont("noto.ttf", 12)
   }
   
-  logo_texture, logo_rect := render_text(renderer, FONT, "BIRDS OF ODIN")
+  logo_texture, logo_rect := render_text(renderer, FONT, APP_NAME)
   sdl.RenderCopy(renderer, logo_texture, nil, &sdl.Rect{
     MAIN_TEXTURE_SIZE[0] / 2 - logo_rect.w / 2,
     MAIN_TEXTURE_SIZE[1] / 2 - logo_rect.h / 2 - 40,
@@ -170,7 +176,7 @@ render_death :: proc(renderer: ^sdl.Renderer) {
     FONT = ttf.OpenFont("noto.ttf", 12)
   }
   
-  logo_texture, logo_rect := render_text(renderer, FONT, "YOU DEAD")
+  logo_texture, logo_rect := render_text(renderer, FONT, "YOU'RE DEAD")
   sdl.RenderCopy(renderer, logo_texture, nil, &sdl.Rect{
     MAIN_TEXTURE_SIZE[0] / 2 - logo_rect.w / 2,
     MAIN_TEXTURE_SIZE[1] / 2 - logo_rect.h / 2,
@@ -244,15 +250,9 @@ check_pipe_collision :: proc(pipe: ^Entity, player: ^Entity) -> bool {
   topPipeRect := get_pipe_top_rect(pipe)
   bottomPipeRect := get_pipe_bottom_rect(pipe)
 
-  if (check_rect_collision(&playerRect, &topPipeRect)) {
-    return true
-  }
-  
-  if (check_rect_collision(&playerRect, &bottomPipeRect)) {
-    return true
-  }
-
-  return false
+  return (
+    check_rect_collision(&playerRect, &topPipeRect) || 
+    check_rect_collision(&playerRect, &bottomPipeRect))
 }
 
 check_death :: proc(state: ^AppState, player: ^Entity) -> bool {
@@ -342,7 +342,10 @@ main :: proc() {
 
   player := &Entity{
     .Player,
-    [2]f32{ cast(f32)MAIN_TEXTURE_SIZE[0] / 3, cast(f32)MAIN_TEXTURE_SIZE[1] / 2 },
+    [2]f32{
+      cast(f32)MAIN_TEXTURE_SIZE[0] / 3,
+      cast(f32)MAIN_TEXTURE_SIZE[1] / 2,
+    },
     [2]f32{ 0, 0 },
   }
 
@@ -417,7 +420,6 @@ main :: proc() {
         break;
     }
 
-    // Set render target back to window and draw texture to it
     sdl.SetRenderTarget(ctx.renderer, nil)
     sdl.RenderCopy(ctx.renderer, ctx.texture, nil, nil)
     sdl.RenderPresent(ctx.renderer)
