@@ -2,6 +2,7 @@ package main
 
 import "core:fmt"
 import "core:time"
+import strings "core:strings"
 import math "core:math"
 import rnd "core:math/rand"
 
@@ -29,6 +30,7 @@ AppState :: struct {
   entity: ^Entity,
 	pipes: [3]Entity,
   rand: ^rnd.Rand,
+  score: int,
 }
 
 GameScene :: enum {
@@ -42,10 +44,13 @@ EntityType :: enum {
 	Pipe,
 }
 
+PIPE_ACTIVATED_FLAG_INDEX:int = 0
+
 Entity :: struct {
 	type: EntityType,
 	pos: [2]f32,
   vel: [2]f32,
+  flags: [8]byte,
 }
 
 PLAYER_WIDTH, PLAYER_HEIGHT:i32 = 24.0, 24.0
@@ -87,7 +92,7 @@ PIPE_OFFSET_Y:i32 = PIPE_SPACING_Y / 2
 
 get_pipe_top_rect :: proc (pipe: ^Entity) -> sdl.Rect {
   return sdl.Rect{
-    cast(i32)pipe.pos.x,
+    cast(i32)pipe.pos.x - PIPE_WIDTH / 2,
     0,
     PIPE_WIDTH,
     cast(i32)pipe.pos.y - PIPE_OFFSET_Y,
@@ -96,16 +101,43 @@ get_pipe_top_rect :: proc (pipe: ^Entity) -> sdl.Rect {
 
 get_pipe_bottom_rect :: proc(pipe: ^Entity) -> sdl.Rect {
   return sdl.Rect{
-    cast(i32)pipe.pos.x,
+    cast(i32)pipe.pos.x - PIPE_WIDTH / 2,
     cast(i32)pipe.pos.y + PIPE_OFFSET_Y,
     PIPE_WIDTH,
     MAIN_TEXTURE_SIZE[1] - cast(i32)pipe.pos.y - PIPE_OFFSET_Y, 
   }
 }
 
+get_pipe_success_rect :: proc(pipe: ^Entity) -> sdl.Rect {
+  return sdl.Rect{
+    cast(i32)pipe.pos.x + PIPE_WIDTH / 2,
+    cast(i32)pipe.pos.y - PIPE_SPACING_Y / 2,
+    PIPE_WIDTH,
+    PIPE_SPACING_Y,
+  }
+}
+
 render_pipe :: proc(renderer: ^sdl.Renderer, entity: ^Entity) {
-  sdl.SetRenderDrawColor(renderer, 0xEE,0xEE,0xEE,0xFF)
+  // TODO: add debug mode in app state and render this if it's active  
+  // sdl.SetRenderDrawColor(renderer, 0xEE,0xEE,0xEE,0x22)
+  // sdl.RenderDrawLine(
+  //   renderer,
+  //   cast(i32)entity.pos[0],
+  //   0,
+  //   cast(i32)entity.pos[0],
+  //   cast(i32)MAIN_TEXTURE_SIZE[1],
+  // )
+  // passedRect := get_pipe_success_rect(entity)
+  // sdl.SetRenderDrawColor(
+  //   renderer,
+  //   0xee,
+  //   bool(entity.flags[PIPE_ACTIVATED_FLAG_INDEX]) ? 0xff : 0xee,
+  //   0xee,
+  //   0xff,
+  // )
+  // sdl.RenderDrawRect(renderer, &passedRect)
   
+  sdl.SetRenderDrawColor(renderer, 0xEE,0xEE,0xEE,0xFF)
   topRect := get_pipe_top_rect(entity)
   sdl.RenderDrawRect(renderer, &topRect)
   
@@ -168,13 +200,21 @@ render_main_menu :: proc(renderer: ^sdl.Renderer) {
   })
 }
 
-render_death :: proc(renderer: ^sdl.Renderer) {
+render_death :: proc(renderer: ^sdl.Renderer, state: ^AppState) {
   if (ttf.WasInit() < 1) {
     ttf.Init()
   }
   if (FONT == nil) {
     FONT = ttf.OpenFont("noto.ttf", 12)
   }
+
+  score_texture, score_rect := render_text(renderer, FONT, strings.clone_to_cstring(get_score_text(state.score)))
+  sdl.RenderCopy(renderer, score_texture, score_rect, &sdl.Rect{
+    MAIN_TEXTURE_SIZE[0] / 2 - score_rect.w / 2,
+    60,
+    score_rect.w,
+    score_rect.h,
+  })
   
   logo_texture, logo_rect := render_text(renderer, FONT, "YOU'RE DEAD")
   sdl.RenderCopy(renderer, logo_texture, nil, &sdl.Rect{
@@ -193,15 +233,37 @@ render_death :: proc(renderer: ^sdl.Renderer) {
   })
 }
 
+get_score_text :: proc(score: int) -> string {
+  builder := strings.Builder{}
+  strings.write_string(&builder, "Your score: ")
+  strings.write_int(&builder, score)
+  res := strings.to_string(builder)
+
+  return res
+}
+
+render_ingame :: proc(renderer: ^sdl.Renderer, state: ^AppState) {
+  score := strings.clone_to_cstring(get_score_text(state.score))
+
+  score_texture, score_rect := render_text(renderer, FONT, score)
+  sdl.RenderCopy(renderer, score_texture, score_rect, &sdl.Rect{
+    MAIN_TEXTURE_SIZE[0] / 2 - score_rect.w / 2,
+    20,
+    score_rect.w,
+    score_rect.h,
+  })
+}
+
 PLAYER_JUMP_VELOCITY: f32 = -100
 PLAYER_GRAVITY_VEL: f32 = 1
+PLAYER_GRAVITY_LIMIT: f32 = 100
 update_player :: proc(entity: ^Entity, state: ^AppState) {
   isJumpPressed := b8(state.inputs[sdl.SCANCODE_SPACE])
 
   if (isJumpPressed) {
     entity.vel[1] = PLAYER_JUMP_VELOCITY
   } else { 
-    entity.vel[1] = entity.vel[1] + PLAYER_GRAVITY_VEL
+    entity.vel[1] = math.min(entity.vel[1] + PLAYER_GRAVITY_VEL, PLAYER_GRAVITY_LIMIT)
   }
 
   entity.pos += entity.vel * f32(TICKTIME) / 1000.0
@@ -211,7 +273,8 @@ PIPE_MOV_SPEED:f32 = 1
 update_pipe :: proc(entity: ^Entity, state: ^AppState) {
   entity.pos[0] -= PIPE_MOV_SPEED *f32(TICKRATE) / 1000.0
 
-  if (entity.pos[0] <= f32(-PIPE_WIDTH)) {
+  if (entity.pos[0] <= f32(-PIPE_WIDTH * 2)) {
+    entity.flags[PIPE_ACTIVATED_FLAG_INDEX] = 0o0
     entity.pos[0] += f32(PIPE_SPACING_X) * 3.0
   } 
 }
@@ -245,6 +308,14 @@ check_rect_collision :: proc(recta: ^sdl.Rect, rectb: ^sdl.Rect) -> bool {
     lefta >= rightb)
 }
 
+check_boundaries :: proc (player: ^Entity) -> bool {
+  posy := cast(i32)player.pos[1]
+  offset := PLAYER_HEIGHT / 2
+  return (
+    posy - offset <= 0 ||
+    posy + offset >= MAIN_TEXTURE_SIZE[1])
+}
+
 check_pipe_collision :: proc(pipe: ^Entity, player: ^Entity) -> bool {
   playerRect := get_player_rect(player)
   topPipeRect := get_pipe_top_rect(pipe)
@@ -256,9 +327,34 @@ check_pipe_collision :: proc(pipe: ^Entity, player: ^Entity) -> bool {
 }
 
 check_death :: proc(state: ^AppState, player: ^Entity) -> bool {
+  if (check_boundaries(player)) {
+    return true
+  }
+
   for _, i in state.pipes {
     if (check_pipe_collision(&state.pipes[i], player)) {
       return true
+    }
+  }
+  return false;
+}
+
+check_pipe_passed :: proc(player: ^Entity, pipe: ^Entity) -> bool {
+  isPipeActivated := pipe.flags[PIPE_ACTIVATED_FLAG_INDEX];
+  if (bool(isPipeActivated)) {
+    return false
+  }
+
+  pipeRect := get_pipe_success_rect(pipe)
+  playerRect := get_player_rect(player)
+  return check_rect_collision(&playerRect, &pipeRect);
+}
+
+check_score_up :: proc(state: ^AppState, player: ^Entity) -> bool {
+  for _, i in state.pipes {
+    if (check_pipe_passed(player, &state.pipes[i])) {
+      state.pipes[i].flags[PIPE_ACTIVATED_FLAG_INDEX] = 0o1
+      return true;
     }
   }
   return false;
@@ -294,6 +390,7 @@ main :: proc() {
           get_random_pipe_y(&rand),
         },
         [2]f32{},
+        0,
       },
       Entity{
         .Pipe,
@@ -302,6 +399,7 @@ main :: proc() {
           get_random_pipe_y(&rand),
         },
         [2]f32{},
+        0,
       },
       Entity{
         .Pipe,
@@ -310,6 +408,7 @@ main :: proc() {
           get_random_pipe_y(&rand),
         },
         [2]f32{},
+        0,
       },
     },
   }
@@ -347,6 +446,7 @@ main :: proc() {
       cast(f32)MAIN_TEXTURE_SIZE[1] / 2,
     },
     [2]f32{ 0, 0 },
+    0,
   }
 
 	for {
@@ -377,6 +477,8 @@ main :: proc() {
 
           if (check_death(state, player)) {
             state.scene = .Death
+          } else if (check_score_up(state, player)) {
+            state.score += 1
           }
           break;
         case .MainMenu:
@@ -410,13 +512,15 @@ main :: proc() {
         for _, i in state.pipes {
           render_entity(ctx.renderer, &state.pipes[i])
         }
-        render_death(ctx.renderer)
+        render_death(ctx.renderer, state)
         break;
       case .InGame:
         render_entity(ctx.renderer, player)
         for _, i in state.pipes {
           render_entity(ctx.renderer, &state.pipes[i])
         }
+
+        render_ingame(ctx.renderer, state)
         break;
     }
 
