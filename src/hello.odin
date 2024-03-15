@@ -2,129 +2,530 @@ package main
 
 import "core:fmt"
 import "core:time"
-import str "core:strings"
+import strings "core:strings"
+import math "core:math"
+import rnd "core:math/rand"
 
-import SDL "vendor:sdl2"
-import TTF "vendor:sdl2/ttf"
+import sdl "vendor:sdl2"
+import ttf "vendor:sdl2/ttf"
 
-import ENG "engine"
+APP_NAME: cstring = "BIRDS OF ODIN"
+
+Context :: struct {
+	window:   ^sdl.Window,
+	renderer: ^sdl.Renderer,
+	texture:  ^sdl.Texture,
+}
+
+GameTime :: struct {
+  last: f64,
+  delta: f64,
+}
 
 AppState :: struct {
-  ctx: ENG.Context,
-  texture: ^SDL.Texture,
-  gameState: ^GameState,
+  scene: GameScene,
+	inputs: []u8,
+  time: GameTime,
+  delta: f64,
+  entity: ^Entity,
+	pipes: [3]Entity,
+  rand: ^rnd.Rand,
+  score: int,
 }
 
-Vector2 :: struct {
-  x: int,
-  y: int,
+GameScene :: enum {
+  MainMenu,
+  InGame,
+  Death,
 }
 
-GameState :: struct {
-  pos: ^Vector2,
-  mov: ^Vector2,
+EntityType :: enum {
+	Player,
+	Pipe,
 }
 
-MAIN_TEXTURE_SIZE: ^Vector2 = &Vector2{
-  256,
-  144,
+PIPE_ACTIVATED_FLAG_INDEX:int = 0
+
+Entity :: struct {
+	type: EntityType,
+	pos: [2]f32,
+  vel: [2]f32,
+  flags: [8]byte,
 }
 
-createDebugTexture :: proc(renderer: ^SDL.Renderer, message: cstring) -> (^SDL.Texture, ^SDL.Rect) {
-  font := TTF.OpenFont("noto.ttf", 24)
-  assert(font != nil, SDL.GetErrorString())
-  surface := TTF.RenderText_Solid(font, message, { 0x00, 0xFF, 0x00, 0xFF })
-  texture := SDL.CreateTextureFromSurface(renderer, surface)
+PLAYER_WIDTH, PLAYER_HEIGHT:i32 = 24.0, 24.0
 
-  size := &SDL.Rect{ 0, 0, surface.w, surface.h }
-  return texture, size
+get_player_rect :: proc(player: ^Entity) -> sdl.Rect {
+  return sdl.Rect{
+    cast(i32)player.pos[0] - PLAYER_WIDTH / 2,
+    cast(i32)player.pos[1] - PLAYER_HEIGHT / 2,
+    PLAYER_WIDTH,
+    PLAYER_HEIGHT,
+  }
+}
+
+render_player :: proc(renderer: ^sdl.Renderer, entity: ^Entity) {
+  playerRect := get_player_rect(entity)
+
+  sdl.SetRenderDrawColor(renderer, 0xff, 0xff, 0xff, 0xff)
+  sdl.RenderDrawRect(renderer, &playerRect)
+
+  bobblingy := cast(i32)entity.vel[1] / 20 
+  sdl.RenderDrawRect(renderer, &sdl.Rect{
+    playerRect.x + playerRect.w - 3,
+    playerRect.y + (playerRect.h / 2) + bobblingy - 3,
+    6,
+    6,
+  })
+  sdl.RenderDrawRect(renderer, &sdl.Rect{
+    playerRect.x - 3,
+    playerRect.y + (playerRect.h / 2) - bobblingy + 3,
+    6,
+    6,
+  })
+}
+
+PIPE_WIDTH:i32 = 32
+PIPE_SPACING_X:i32 = 140
+PIPE_SPACING_Y:i32 = 80
+PIPE_OFFSET_Y:i32 = PIPE_SPACING_Y / 2
+
+get_pipe_top_rect :: proc (pipe: ^Entity) -> sdl.Rect {
+  return sdl.Rect{
+    cast(i32)pipe.pos.x - PIPE_WIDTH / 2,
+    0,
+    PIPE_WIDTH,
+    cast(i32)pipe.pos.y - PIPE_OFFSET_Y,
+  }
+}
+
+get_pipe_bottom_rect :: proc(pipe: ^Entity) -> sdl.Rect {
+  return sdl.Rect{
+    cast(i32)pipe.pos.x - PIPE_WIDTH / 2,
+    cast(i32)pipe.pos.y + PIPE_OFFSET_Y,
+    PIPE_WIDTH,
+    MAIN_TEXTURE_SIZE[1] - cast(i32)pipe.pos.y - PIPE_OFFSET_Y, 
+  }
+}
+
+get_pipe_success_rect :: proc(pipe: ^Entity) -> sdl.Rect {
+  return sdl.Rect{
+    cast(i32)pipe.pos.x + PIPE_WIDTH / 2,
+    cast(i32)pipe.pos.y - PIPE_SPACING_Y / 2,
+    PIPE_WIDTH,
+    PIPE_SPACING_Y,
+  }
+}
+
+render_pipe :: proc(renderer: ^sdl.Renderer, entity: ^Entity) {
+  // TODO: add debug mode in app state and render this if it's active  
+  // sdl.SetRenderDrawColor(renderer, 0xEE,0xEE,0xEE,0x22)
+  // sdl.RenderDrawLine(
+  //   renderer,
+  //   cast(i32)entity.pos[0],
+  //   0,
+  //   cast(i32)entity.pos[0],
+  //   cast(i32)MAIN_TEXTURE_SIZE[1],
+  // )
+  // passedRect := get_pipe_success_rect(entity)
+  // sdl.SetRenderDrawColor(
+  //   renderer,
+  //   0xee,
+  //   bool(entity.flags[PIPE_ACTIVATED_FLAG_INDEX]) ? 0xff : 0xee,
+  //   0xee,
+  //   0xff,
+  // )
+  // sdl.RenderDrawRect(renderer, &passedRect)
+  
+  sdl.SetRenderDrawColor(renderer, 0xEE,0xEE,0xEE,0xFF)
+  topRect := get_pipe_top_rect(entity)
+  sdl.RenderDrawRect(renderer, &topRect)
+  
+  bottomRect := get_pipe_bottom_rect(entity)
+  sdl.RenderDrawRect(renderer, &bottomRect)
+}
+
+render_entity :: proc(renderer: ^sdl.Renderer, entity: ^Entity) {
+  switch(entity.type) {
+    case EntityType.Player:
+      render_player(renderer, entity)
+      break;
+    case EntityType.Pipe:
+      render_pipe(renderer, entity)
+      break;
+  }
+}
+
+render_text :: proc(
+  renderer: ^sdl.Renderer,
+  font: ^ttf.Font,
+  message: cstring,
+) -> (_texture: ^sdl.Texture, _rect: ^sdl.Rect) {
+  surface := ttf.RenderText_Solid(font, message, sdl.Color{ 0xff, 0xff, 0xff, 0xff })
+  texture := sdl.CreateTextureFromSurface(renderer, surface)
+  rect := &sdl.Rect{
+    0,
+    0,
+    surface.w,
+    surface.h,
+  }
+
+  return texture, rect;
+}
+
+FONT: ^ttf.Font
+
+render_main_menu :: proc(renderer: ^sdl.Renderer) {
+  if (ttf.WasInit() < 1) {
+    ttf.Init()
+  }
+  if (FONT == nil) {
+    FONT = ttf.OpenFont("noto.ttf", 12)
+  }
+  
+  logo_texture, logo_rect := render_text(renderer, FONT, APP_NAME)
+  sdl.RenderCopy(renderer, logo_texture, nil, &sdl.Rect{
+    MAIN_TEXTURE_SIZE[0] / 2 - logo_rect.w / 2,
+    MAIN_TEXTURE_SIZE[1] / 2 - logo_rect.h / 2 - 40,
+    logo_rect.w,
+    logo_rect.h,
+  })
+  
+  cta_texture, cta_rect := render_text(renderer, FONT, "Press <space> to play")
+  sdl.RenderCopy(renderer, cta_texture, nil, &sdl.Rect{
+    MAIN_TEXTURE_SIZE[0] / 2 - cta_rect.w / 4,
+    MAIN_TEXTURE_SIZE[1] / 2 - cta_rect.h / 4 + logo_rect.h - 20,
+    cta_rect.w / 2,
+    cta_rect.h / 2,
+  })
+}
+
+render_death :: proc(renderer: ^sdl.Renderer, state: ^AppState) {
+  if (ttf.WasInit() < 1) {
+    ttf.Init()
+  }
+  if (FONT == nil) {
+    FONT = ttf.OpenFont("noto.ttf", 12)
+  }
+
+  score_texture, score_rect := render_text(renderer, FONT, strings.clone_to_cstring(get_score_text(state.score)))
+  sdl.RenderCopy(renderer, score_texture, score_rect, &sdl.Rect{
+    MAIN_TEXTURE_SIZE[0] / 2 - score_rect.w / 2,
+    60,
+    score_rect.w,
+    score_rect.h,
+  })
+  
+  logo_texture, logo_rect := render_text(renderer, FONT, "YOU'RE DEAD")
+  sdl.RenderCopy(renderer, logo_texture, nil, &sdl.Rect{
+    MAIN_TEXTURE_SIZE[0] / 2 - logo_rect.w / 2,
+    MAIN_TEXTURE_SIZE[1] / 2 - logo_rect.h / 2,
+    logo_rect.w,
+    logo_rect.h,
+  })
+  
+  cta_texture, cta_rect := render_text(renderer, FONT, "Press <escape> to quit")
+  sdl.RenderCopy(renderer, cta_texture, nil, &sdl.Rect{
+    MAIN_TEXTURE_SIZE[0] / 2 - cta_rect.w / 4,
+    MAIN_TEXTURE_SIZE[1] / 2 - cta_rect.h / 4 + logo_rect.h + 20,
+    cta_rect.w / 2,
+    cta_rect.h / 2,
+  })
+}
+
+get_score_text :: proc(score: int) -> string {
+  builder := strings.Builder{}
+  strings.write_string(&builder, "Your score: ")
+  strings.write_int(&builder, score)
+  res := strings.to_string(builder)
+
+  return res
+}
+
+render_ingame :: proc(renderer: ^sdl.Renderer, state: ^AppState) {
+  score := strings.clone_to_cstring(get_score_text(state.score))
+
+  score_texture, score_rect := render_text(renderer, FONT, score)
+  sdl.RenderCopy(renderer, score_texture, score_rect, &sdl.Rect{
+    MAIN_TEXTURE_SIZE[0] / 2 - score_rect.w / 2,
+    20,
+    score_rect.w,
+    score_rect.h,
+  })
+}
+
+PLAYER_JUMP_VELOCITY: f32 = -100
+PLAYER_GRAVITY_VEL: f32 = 1
+PLAYER_GRAVITY_LIMIT: f32 = 100
+update_player :: proc(entity: ^Entity, state: ^AppState) {
+  isJumpPressed := b8(state.inputs[sdl.SCANCODE_SPACE])
+
+  if (isJumpPressed) {
+    entity.vel[1] = PLAYER_JUMP_VELOCITY
+  } else { 
+    entity.vel[1] = math.min(entity.vel[1] + PLAYER_GRAVITY_VEL, PLAYER_GRAVITY_LIMIT)
+  }
+
+  entity.pos += entity.vel * f32(TICKTIME) / 1000.0
+}
+
+PIPE_MOV_SPEED:f32 = 1
+update_pipe :: proc(entity: ^Entity, state: ^AppState) {
+  entity.pos[0] -= PIPE_MOV_SPEED *f32(TICKRATE) / 1000.0
+
+  if (entity.pos[0] <= f32(-PIPE_WIDTH * 2)) {
+    entity.flags[PIPE_ACTIVATED_FLAG_INDEX] = 0o0
+    entity.pos[0] += f32(PIPE_SPACING_X) * 3.0
+  } 
+}
+
+update_entity :: proc(entity: ^Entity, state: ^AppState) {
+  switch(entity.type) {
+    case .Player:
+      update_player(entity, state)
+      break
+    case .Pipe:
+      update_pipe(entity, state)
+      break
+  }
+}
+
+check_rect_collision :: proc(recta: ^sdl.Rect, rectb: ^sdl.Rect) -> bool {
+  lefta := recta.x
+  righta := recta.x + recta.w
+  topa := recta.y
+  bottoma := recta.y + recta.h
+  
+  leftb := rectb.x
+  rightb := rectb.x + rectb.w
+  topb := rectb.y
+  bottomb := rectb.y + rectb.h
+  
+  return !(
+    bottoma <= topb ||
+    topa >= bottomb ||
+    righta <= leftb ||
+    lefta >= rightb)
+}
+
+check_boundaries :: proc (player: ^Entity) -> bool {
+  posy := cast(i32)player.pos[1]
+  offset := PLAYER_HEIGHT / 2
+  return (
+    posy - offset <= 0 ||
+    posy + offset >= MAIN_TEXTURE_SIZE[1])
+}
+
+check_pipe_collision :: proc(pipe: ^Entity, player: ^Entity) -> bool {
+  playerRect := get_player_rect(player)
+  topPipeRect := get_pipe_top_rect(pipe)
+  bottomPipeRect := get_pipe_bottom_rect(pipe)
+
+  return (
+    check_rect_collision(&playerRect, &topPipeRect) || 
+    check_rect_collision(&playerRect, &bottomPipeRect))
+}
+
+check_death :: proc(state: ^AppState, player: ^Entity) -> bool {
+  if (check_boundaries(player)) {
+    return true
+  }
+
+  for _, i in state.pipes {
+    if (check_pipe_collision(&state.pipes[i], player)) {
+      return true
+    }
+  }
+  return false;
+}
+
+check_pipe_passed :: proc(player: ^Entity, pipe: ^Entity) -> bool {
+  isPipeActivated := pipe.flags[PIPE_ACTIVATED_FLAG_INDEX];
+  if (bool(isPipeActivated)) {
+    return false
+  }
+
+  pipeRect := get_pipe_success_rect(pipe)
+  playerRect := get_player_rect(player)
+  return check_rect_collision(&playerRect, &pipeRect);
+}
+
+check_score_up :: proc(state: ^AppState, player: ^Entity) -> bool {
+  for _, i in state.pipes {
+    if (check_pipe_passed(player, &state.pipes[i])) {
+      state.pipes[i].flags[PIPE_ACTIVATED_FLAG_INDEX] = 0o1
+      return true;
+    }
+  }
+  return false;
+}
+
+// WINDOW
+MAIN_TEXTURE_SIZE := [2]i32{160.0, 240.0}
+WINDOW_SCALING: i32 = 4
+
+// TIME
+TICKRATE := 240.0
+TICKTIME := 1000.0 / TICKRATE
+
+get_time :: proc() -> f64 {
+  return f64(sdl.GetPerformanceCounter()) * 1000 / f64(sdl.GetPerformanceFrequency())
+}
+
+get_random_pipe_y :: proc(rand: ^rnd.Rand) -> f32 {
+  return rnd.float32_range(.25, .75, rand) * cast(f32)MAIN_TEXTURE_SIZE[1]
 }
 
 main :: proc() {
-  state := AppState {};
-  state.gameState = &GameState{
-    &Vector2{ 0, 0 },
-    &Vector2{ 1, 1 },
+  rand := rnd.create(cast(u64)get_time())
+  state := &AppState{
+    scene = .MainMenu,
+    time = GameTime{ get_time(), 0 },
+    rand = &rand,
+    pipes = [3]Entity{ 
+      Entity{
+        .Pipe,
+        [2]f32{
+          f32(MAIN_TEXTURE_SIZE[0]),
+          get_random_pipe_y(&rand),
+        },
+        [2]f32{},
+        0,
+      },
+      Entity{
+        .Pipe,
+        [2]f32{
+          f32(MAIN_TEXTURE_SIZE[0]) + f32(PIPE_SPACING_X),
+          get_random_pipe_y(&rand),
+        },
+        [2]f32{},
+        0,
+      },
+      Entity{
+        .Pipe,
+        [2]f32{
+          f32(MAIN_TEXTURE_SIZE[0]) + f32(PIPE_SPACING_X) * 2.0,
+          get_random_pipe_y(&rand),
+        },
+        [2]f32{},
+        0,
+      },
+    },
+  }
+	ctx := &Context{}
+
+	ctx.window = sdl.CreateWindow(
+		APP_NAME,
+		sdl.WINDOWPOS_CENTERED,
+		sdl.WINDOWPOS_CENTERED,
+		MAIN_TEXTURE_SIZE[0] * WINDOW_SCALING,
+		MAIN_TEXTURE_SIZE[1] * WINDOW_SCALING,
+		sdl.WINDOW_SHOWN,
+	)
+	assert(ctx.window != nil, sdl.GetErrorString())
+	defer sdl.DestroyWindow(ctx.window)
+
+	ctx.renderer = sdl.CreateRenderer(ctx.window, -1, {.ACCELERATED, .TARGETTEXTURE})
+	assert(ctx.renderer != nil, sdl.GetErrorString())
+	defer sdl.DestroyRenderer(ctx.renderer)
+
+	ctx.texture = sdl.CreateTexture(
+		ctx.renderer,
+		cast(u32)sdl.PixelFormatEnum.ARGB8888,
+		.TARGET,
+		MAIN_TEXTURE_SIZE[0],
+		MAIN_TEXTURE_SIZE[1],
+	)
+	assert(ctx.texture != nil, sdl.GetErrorString())
+	defer sdl.DestroyTexture(ctx.texture)
+
+  player := &Entity{
+    .Player,
+    [2]f32{
+      cast(f32)MAIN_TEXTURE_SIZE[0] / 3,
+      cast(f32)MAIN_TEXTURE_SIZE[1] / 2,
+    },
+    [2]f32{ 0, 0 },
+    0,
   }
 
-  TTF.Init()
+	for {
+		event: sdl.Event
+    for sdl.PollEvent(&event) {
+			#partial switch event.type {
+			case .QUIT:
+				return
+			}
+    }
 
-  state.ctx = ENG.CreateContext(
-    "Hello world",
-    cast(i32)MAIN_TEXTURE_SIZE.x * 4,
-    cast(i32)MAIN_TEXTURE_SIZE.y * 4,
-  )
-  
-  fmt.eprintln("s")
+    state.inputs = sdl.GetKeyboardStateAsSlice()
+    
+    currentTime := get_time()
+    state.time.delta = currentTime - state.time.last
+    state.time.last = currentTime
 
-  defer ENG.DestroyContext(&state.ctx)
+    for (state.time.delta >= TICKTIME) {
+      state.time.delta -= TICKTIME
 
-  fmt.eprintln(state.ctx)
+      switch (state.scene) { 
+        case .InGame:
+          update_entity(player, state)
 
-  texture := SDL.CreateTexture(
-    state.ctx.renderer,
-    cast(u32)SDL.PixelFormatEnum.ARGB8888,
-    .TARGET,
-    256,
-    144,
-  )
-  assert(texture != nil, SDL.GetErrorString())
-  defer SDL.DestroyTexture(texture)
-  state.texture = texture;
+          for _, i in state.pipes {
+            update_entity(&state.pipes[i], state)
+          }
 
-  lastTickTime := time.now()._nsec
+          if (check_death(state, player)) {
+            state.scene = .Death
+          } else if (check_score_up(state, player)) {
+            state.score += 1
+          }
+          break;
+        case .MainMenu:
+          if (b8(state.inputs[sdl.SCANCODE_SPACE])) {
+            state.scene = .InGame
+          }
+          break;
+        case .Death:
+          if (b8(state.inputs[sdl.SCANCODE_ESCAPE])) {
+            return
+          }
 
-  event: SDL.Event
-  loop: for {
-    for SDL.PollEvent(&event) {
-      #partial switch event.type {
-      case .QUIT:
-          break loop
+          for _, i in state.pipes {
+            update_entity(&state.pipes[i], state)
+          }
+
+          break;
       }
     }
 
-    state.gameState.pos.x += state.gameState.mov.x;
-    state.gameState.pos.y += state.gameState.mov.y;
+    sdl.SetRenderDrawColor(ctx.renderer, 0x00, 0x00, 0x00, 0xFF)
+    sdl.RenderClear(ctx.renderer)
+    sdl.SetRenderTarget(ctx.renderer, ctx.texture)
+    sdl.RenderClear(ctx.renderer)
 
-    if (state.gameState.pos.x >= MAIN_TEXTURE_SIZE.x || state.gameState.pos.x <= 0) {
-      state.gameState.mov.x = -state.gameState.mov.x;
+    switch(state.scene) {
+      case .MainMenu:
+        render_main_menu(ctx.renderer)
+        break;
+      case .Death:
+        for _, i in state.pipes {
+          render_entity(ctx.renderer, &state.pipes[i])
+        }
+        render_death(ctx.renderer, state)
+        break;
+      case .InGame:
+        render_entity(ctx.renderer, player)
+        for _, i in state.pipes {
+          render_entity(ctx.renderer, &state.pipes[i])
+        }
+
+        render_ingame(ctx.renderer, state)
+        break;
     }
-    if (state.gameState.pos.y >= MAIN_TEXTURE_SIZE.y || state.gameState.pos.y <= 0) {
-      state.gameState.mov.y = -state.gameState.mov.y;
-    }
 
-    SDL.SetRenderTarget(state.ctx.renderer, state.texture)
-    SDL.SetRenderDrawColor(state.ctx.renderer, 0, 0, 0, 0xFF)
-    SDL.RenderClear(state.ctx.renderer)
-
-    SDL.SetRenderDrawColor(state.ctx.renderer, 0xFF, 0, 0, 0xFF)
-    SDL.RenderFillRect(
-      state.ctx.renderer, 
-      &SDL.Rect{
-        cast(i32)state.gameState.pos.x,
-        cast(i32)state.gameState.pos.y,
-        10,
-        10,
-      },
-    )
-
-    SDL.SetRenderTarget(state.ctx.renderer, nil)
-    SDL.RenderCopy(state.ctx.renderer, state.texture, nil, nil)
-
-    curTickTime := time.now()._nsec
-    delta := curTickTime - lastTickTime
-    lastTickTime = curTickTime
-    
-    builder := str.Builder{}
-    str.write_string(&builder, "Delta time: ")
-    str.write_int(&builder, cast(int)delta)
-    str.write_string(&builder, "\n")
-    message := str.to_string(builder)
-    // fmt.eprintf(message)
-    debugTexture, debugRect := createDebugTexture(state.ctx.renderer, str.clone_to_cstring(message))
-    SDL.RenderCopy(state.ctx.renderer, debugTexture, nil, &SDL.Rect{10, 10, debugRect.w, debugRect.h })
-
-    SDL.RenderPresent(state.ctx.renderer)
-  }
+    sdl.SetRenderTarget(ctx.renderer, nil)
+    sdl.RenderCopy(ctx.renderer, ctx.texture, nil, nil)
+    sdl.RenderPresent(ctx.renderer)
+	}
 }
-
