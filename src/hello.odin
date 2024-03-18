@@ -1,5 +1,4 @@
 package main
-
 import "core:fmt"
 import "core:time"
 import strings "core:strings"
@@ -9,7 +8,7 @@ import rnd "core:math/rand"
 import sdl "vendor:sdl2"
 import ttf "vendor:sdl2/ttf"
 
-APP_NAME: cstring = "BIRDS OF ODIN"
+APP_NAME :: "BIRDS OF ODIN"
 
 Context :: struct {
 	window:   ^sdl.Window,
@@ -44,7 +43,7 @@ EntityType :: enum {
 	Pipe,
 }
 
-PIPE_ACTIVATED_FLAG_INDEX:int = 0
+PIPE_ACTIVATED_FLAG_INDEX :: 0
 
 Entity :: struct {
 	type: EntityType,
@@ -85,10 +84,10 @@ render_player :: proc(renderer: ^sdl.Renderer, entity: ^Entity) {
   })
 }
 
-PIPE_WIDTH:i32 = 32
-PIPE_SPACING_X:i32 = 140
-PIPE_SPACING_Y:i32 = 80
-PIPE_OFFSET_Y:i32 = PIPE_SPACING_Y / 2
+PIPE_WIDTH :: 32
+PIPE_SPACING_X :: 140
+PIPE_SPACING_Y :: 80
+PIPE_OFFSET_Y :: PIPE_SPACING_Y / 2
 
 get_pipe_top_rect :: proc (pipe: ^Entity) -> sdl.Rect {
   return sdl.Rect{
@@ -118,25 +117,6 @@ get_pipe_success_rect :: proc(pipe: ^Entity) -> sdl.Rect {
 }
 
 render_pipe :: proc(renderer: ^sdl.Renderer, entity: ^Entity) {
-  // TODO: add debug mode in app state and render this if it's active  
-  // sdl.SetRenderDrawColor(renderer, 0xEE,0xEE,0xEE,0x22)
-  // sdl.RenderDrawLine(
-  //   renderer,
-  //   cast(i32)entity.pos[0],
-  //   0,
-  //   cast(i32)entity.pos[0],
-  //   cast(i32)MAIN_TEXTURE_SIZE[1],
-  // )
-  // passedRect := get_pipe_success_rect(entity)
-  // sdl.SetRenderDrawColor(
-  //   renderer,
-  //   0xee,
-  //   bool(entity.flags[PIPE_ACTIVATED_FLAG_INDEX]) ? 0xff : 0xee,
-  //   0xee,
-  //   0xff,
-  // )
-  // sdl.RenderDrawRect(renderer, &passedRect)
-  
   sdl.SetRenderDrawColor(renderer, 0xEE,0xEE,0xEE,0xFF)
   topRect := get_pipe_top_rect(entity)
   sdl.RenderDrawRect(renderer, &topRect)
@@ -156,14 +136,14 @@ render_entity :: proc(renderer: ^sdl.Renderer, entity: ^Entity) {
   }
 }
 
-render_text :: proc(
+create_text_texture :: proc(
   renderer: ^sdl.Renderer,
   font: ^ttf.Font,
   message: cstring,
-) -> (_texture: ^sdl.Texture, _rect: ^sdl.Rect) {
+) -> (_texture: ^sdl.Texture, _rect: sdl.Rect) {
   surface := ttf.RenderText_Solid(font, message, sdl.Color{ 0xff, 0xff, 0xff, 0xff })
   texture := sdl.CreateTextureFromSurface(renderer, surface)
-  rect := &sdl.Rect{
+  rect := sdl.Rect{
     0,
     0,
     surface.w,
@@ -183,7 +163,7 @@ render_main_menu :: proc(renderer: ^sdl.Renderer) {
     FONT = ttf.OpenFont("noto.ttf", 12)
   }
   
-  logo_texture, logo_rect := render_text(renderer, FONT, APP_NAME)
+  logo_texture, logo_rect := create_text_texture(renderer, FONT, APP_NAME)
   sdl.RenderCopy(renderer, logo_texture, nil, &sdl.Rect{
     MAIN_TEXTURE_SIZE[0] / 2 - logo_rect.w / 2,
     MAIN_TEXTURE_SIZE[1] / 2 - logo_rect.h / 2 - 40,
@@ -191,7 +171,7 @@ render_main_menu :: proc(renderer: ^sdl.Renderer) {
     logo_rect.h,
   })
   
-  cta_texture, cta_rect := render_text(renderer, FONT, "Press <space> to play")
+  cta_texture, cta_rect := create_text_texture(renderer, FONT, "Press <space> to play")
   sdl.RenderCopy(renderer, cta_texture, nil, &sdl.Rect{
     MAIN_TEXTURE_SIZE[0] / 2 - cta_rect.w / 4,
     MAIN_TEXTURE_SIZE[1] / 2 - cta_rect.h / 4 + logo_rect.h - 20,
@@ -208,15 +188,21 @@ render_death :: proc(renderer: ^sdl.Renderer, state: ^AppState) {
     FONT = ttf.OpenFont("noto.ttf", 12)
   }
 
-  score_texture, score_rect := render_text(renderer, FONT, strings.clone_to_cstring(get_score_text(state.score)))
-  sdl.RenderCopy(renderer, score_texture, score_rect, &sdl.Rect{
+  score_texture, score_rect := create_text_texture(
+    renderer,
+    FONT,
+    strings.clone_to_cstring(get_score_text(state.score)),
+  )
+  sdl.RenderCopy(renderer, score_texture, &score_rect, &sdl.Rect{
     MAIN_TEXTURE_SIZE[0] / 2 - score_rect.w / 2,
     60,
     score_rect.w,
     score_rect.h,
   })
+
+  // delete score_rect
   
-  logo_texture, logo_rect := render_text(renderer, FONT, "YOU'RE DEAD")
+  logo_texture, logo_rect := create_text_texture(renderer, FONT, "YOU'RE DEAD")
   sdl.RenderCopy(renderer, logo_texture, nil, &sdl.Rect{
     MAIN_TEXTURE_SIZE[0] / 2 - logo_rect.w / 2,
     MAIN_TEXTURE_SIZE[1] / 2 - logo_rect.h / 2,
@@ -224,7 +210,7 @@ render_death :: proc(renderer: ^sdl.Renderer, state: ^AppState) {
     logo_rect.h,
   })
   
-  cta_texture, cta_rect := render_text(renderer, FONT, "Press <escape> to quit")
+  cta_texture, cta_rect := create_text_texture(renderer, FONT, "Press <escape> to quit")
   sdl.RenderCopy(renderer, cta_texture, nil, &sdl.Rect{
     MAIN_TEXTURE_SIZE[0] / 2 - cta_rect.w / 4,
     MAIN_TEXTURE_SIZE[1] / 2 - cta_rect.h / 4 + logo_rect.h + 20,
@@ -245,8 +231,10 @@ get_score_text :: proc(score: int) -> string {
 render_ingame :: proc(renderer: ^sdl.Renderer, state: ^AppState) {
   score := strings.clone_to_cstring(get_score_text(state.score))
 
-  score_texture, score_rect := render_text(renderer, FONT, score)
-  sdl.RenderCopy(renderer, score_texture, score_rect, &sdl.Rect{
+  score_texture, score_rect := create_text_texture(renderer, FONT, score)
+ 
+  fmt.eprintln(score_rect)
+  sdl.RenderCopy(renderer, score_texture, &score_rect, &sdl.Rect{
     MAIN_TEXTURE_SIZE[0] / 2 - score_rect.w / 2,
     20,
     score_rect.w,
@@ -254,9 +242,10 @@ render_ingame :: proc(renderer: ^sdl.Renderer, state: ^AppState) {
   })
 }
 
-PLAYER_JUMP_VELOCITY: f32 = -100
-PLAYER_GRAVITY_VEL: f32 = 1
-PLAYER_GRAVITY_LIMIT: f32 = 100
+PLAYER_JUMP_VELOCITY :: -100
+PLAYER_GRAVITY_VEL :: 1
+PLAYER_GRAVITY_LIMIT :: 100
+
 update_player :: proc(entity: ^Entity, state: ^AppState) {
   isJumpPressed := b8(state.inputs[sdl.SCANCODE_SPACE])
 
@@ -269,13 +258,14 @@ update_player :: proc(entity: ^Entity, state: ^AppState) {
   entity.pos += entity.vel * f32(TICKTIME) / 1000.0
 }
 
-PIPE_MOV_SPEED:f32 = 1
+PIPE_MOV_SPEED :: 1
 update_pipe :: proc(entity: ^Entity, state: ^AppState) {
   entity.pos[0] -= PIPE_MOV_SPEED *f32(TICKRATE) / 1000.0
 
   if (entity.pos[0] <= f32(-PIPE_WIDTH * 2)) {
     entity.flags[PIPE_ACTIVATED_FLAG_INDEX] = 0o0
     entity.pos[0] += f32(PIPE_SPACING_X) * 3.0
+    entity.pos[1] = get_random_pipe_y(state.rand)
   } 
 }
 
@@ -361,12 +351,12 @@ check_score_up :: proc(state: ^AppState, player: ^Entity) -> bool {
 }
 
 // WINDOW
-MAIN_TEXTURE_SIZE := [2]i32{160.0, 240.0}
-WINDOW_SCALING: i32 = 4
+MAIN_TEXTURE_SIZE :: [2]i32{160.0, 240.0}
+WINDOW_SCALING :: 4
 
 // TIME
-TICKRATE := 240.0
-TICKTIME := 1000.0 / TICKRATE
+TICKRATE :: 240.0
+TICKTIME :: 1000.0 / TICKRATE
 
 get_time :: proc() -> f64 {
   return f64(sdl.GetPerformanceCounter()) * 1000 / f64(sdl.GetPerformanceFrequency())
