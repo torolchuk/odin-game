@@ -11,7 +11,7 @@ WINDOW_NAME :: "RAYCASTED"
 WINDOW_WIDHT :: 1024 * 2
 WINDOW_HEIGHT :: 512 * 2
 PIXEL_SIZE :: 2 * 2
-TEXTURE_WIDHT :: WINDOW_WIDHT / PIXEL_SIZE
+TEXTURE_WIDTH :: WINDOW_WIDHT / PIXEL_SIZE
 TEXTURE_HEIGHT :: WINDOW_HEIGHT / PIXEL_SIZE
 
 COLOR_CLEAR := [4]u8{0x40, 0x40, 0x40, 0xff}
@@ -318,10 +318,53 @@ render_2d_raycasts :: proc(renderer: ^sdl.Renderer, gameState: ^GameState) {
 	}
 }
 
+clamp_angle :: proc (angle: f32) -> f32 {
+  if (angle < 0) {
+    return angle + math.PI * 2
+  }
+  if (angle > math.PI * 2) {
+    return angle - math.PI * 2
+  }
+
+  return angle
+}
+
+render_projection :: proc(renderer: ^sdl.Renderer, game_state: ^GameState) {
+  width:f32 = TEXTURE_WIDTH / RAY_COUNT
+  max_height:f32 = TEXTURE_HEIGHT / 2
+
+  max_distance: f32 = 100
+
+  for i: f32 = 0; i < RAY_COUNT; i += 1 {
+    ray_offset := RAY_STEP * i - PLAYER_FOV_HALF
+    ray_angle := clamp_angle(game_state.player_angle + ray_offset)
+    
+    hit, mp, length := get_raycast_hit(
+			&game_state.game_map,
+			&game_state.player_pos,
+			ray_angle,
+		)
+  
+    wall_height:f32 = 1 - math.min(length, max_distance) / max_distance
+
+    set_render_color(renderer, MAP_COLORS[game_state.game_map[mp]])
+
+    rect := sdl.Rect{
+      cast(i32)(width * i),
+      cast(i32)(max_height - max_height * wall_height),
+      cast(i32)(width),
+      cast(i32)(wall_height * max_height * 2),
+    }
+    sdl.RenderFillRect(renderer, &rect)
+
+  }
+}
+
 render_game :: proc(renderer: ^sdl.Renderer, gameState: ^GameState) {
 	render_map(renderer, gameState.game_map)
 	render_2d_raycasts(renderer, gameState)
 	render_player(renderer, gameState)
+  // render_projection(renderer, gameState)
 }
 
 PLAYER_MOV_SPEED :: 0.3
@@ -415,7 +458,7 @@ main :: proc() {
 		renderer,
 		cast(u32)sdl.PixelFormatEnum.ARGB8888,
 		.TARGET,
-		TEXTURE_WIDHT,
+		TEXTURE_WIDTH / 2,
 		TEXTURE_HEIGHT,
 	)
 
@@ -423,7 +466,7 @@ main :: proc() {
 		renderer,
 		cast(u32)sdl.PixelFormatEnum.ARGB8888,
 		.TARGET,
-		TEXTURE_WIDHT,
+		TEXTURE_WIDTH,
 		TEXTURE_HEIGHT,
 	)
 
@@ -462,8 +505,19 @@ main :: proc() {
 
 		render_game(renderer, &gameState)
 
+    sdl.SetRenderTarget(renderer, texture_3d)
+
+    set_render_color(renderer, &COLOR_BLACK)
+    sdl.RenderClear(renderer)
+    set_render_color(renderer, &COLOR_BLUE)
+    sdl.RenderFillRect(renderer, &sdl.Rect{0, 0, TEXTURE_WIDTH, TEXTURE_HEIGHT / 2})
+    set_render_color(renderer, &COLOR_GRAY)
+    sdl.RenderFillRect(renderer, &sdl.Rect{0, TEXTURE_HEIGHT / 2, TEXTURE_WIDTH, TEXTURE_HEIGHT / 2})
+    render_projection(renderer, &gameState)
+    
 		sdl.SetRenderTarget(renderer, nil)
-		sdl.RenderCopy(renderer, texture_2d, nil, nil)
+		sdl.RenderCopy(renderer, texture_3d, nil, nil)
+		sdl.RenderCopy(renderer, texture_2d, nil, &sdl.Rect{ 20, 20, 160, 160 })
 		sdl.RenderPresent(renderer)
 	}
 }
